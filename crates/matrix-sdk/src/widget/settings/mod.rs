@@ -25,7 +25,8 @@ mod element_call;
 mod url_params;
 
 pub use self::element_call::{
-    EncryptionSystem, Intent, VirtualElementCallWidgetConfig, VirtualElementCallWidgetProperties,
+    CameraBackground, EncryptionSystem, Intent, VirtualElementCallWidgetConfig,
+    VirtualElementCallWidgetProperties,
 };
 
 /// Settings of the widget.

@@ -103,6 +103,11 @@ struct ElementCallUrlParams {
     controlled_audio_devices: Option<bool>,
     /// Supported since Element Call v0.14.0.
     send_notification_type: Option<NotificationType>,
+    /// The background effect applied to the local camera feed.
+    background_effect: Option<BackgroundEffectKind>,
+    /// The url of the picture used to replace the camera background. Only set
+    /// if `background_effect` is `image`.
+    background_image_url: Option<String>,
 }
 
 /// Defines if a call is encrypted and which encryption system should be used.
@@ -174,6 +179,47 @@ pub enum NotificationType {
     Ring,
 }
 
+/// A background effect for the local camera feed of a call (huddle).
+///
+/// This allows replacing the background behind the user with a picture, like
+/// a virtual green screen, or blurring it.
+///
+/// This controls the url parameters: `backgroundEffect`,
+/// `backgroundImageUrl`.
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+#[derive(Debug, PartialEq, Clone)]
+pub enum CameraBackground {
+    /// Show the camera feed unmodified.
+    None,
+    /// Blur the background behind the user.
+    Blur,
+    /// Replace the background behind the user with a picture.
+    Image {
+        /// The url of the picture. Can be an `http(s)`, `data:` or `mxc://`
+        /// url.
+        url: String,
+    },
+}
+
+/// The url parameter representation of a [`CameraBackground`].
+#[derive(Debug, PartialEq, Serialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+enum BackgroundEffectKind {
+    None,
+    Blur,
+    Image,
+}
+
+impl CameraBackground {
+    fn into_url_params(self) -> (BackgroundEffectKind, Option<String>) {
+        match self {
+            CameraBackground::None => (BackgroundEffectKind::None, None),
+            CameraBackground::Blur => (BackgroundEffectKind::Blur, None),
+            CameraBackground::Image { url } => (BackgroundEffectKind::Image, Some(url)),
+        }
+    }
+}
+
 /// Configuration parameters, to create a new virtual Element Call widget.
 ///
 /// If `intent` is provided the appropriate default values for all other
@@ -242,6 +288,13 @@ pub struct VirtualElementCallWidgetConfig {
     /// starting a call.
     #[cfg_attr(feature = "uniffi", uniffi(default = None))]
     pub send_notification_type: Option<NotificationType>,
+
+    /// The background effect applied to the local camera feed, e.g. a
+    /// background picture (virtual green screen) or a blur.
+    ///
+    /// Default: no effect.
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub camera_background: Option<CameraBackground>,
 }
 
 /// Properties to create a new virtual Element Call widget.
@@ -339,6 +392,12 @@ impl WidgetSettings {
     ) -> Result<Self, url::ParseError> {
         let mut raw_url: Url = Url::parse(&props.element_call_url)?;
 
+        let (background_effect, background_image_url) =
+            match config.camera_background.map(CameraBackground::into_url_params) {
+                Some((kind, url)) => (Some(kind), url),
+                None => (None, None),
+            };
+
         #[allow(deprecated)]
         let query_params = ElementCallUrlParams {
             user_id: url_params::USER_ID.to_owned(),
@@ -376,6 +435,8 @@ impl WidgetSettings {
             hide_screensharing: config.hide_screensharing,
             controlled_audio_devices: config.controlled_audio_devices,
             send_notification_type: config.send_notification_type,
+            background_effect,
+            background_image_url,
         };
 
         let query =
@@ -403,7 +464,7 @@ mod tests {
 
     use crate::widget::{
         ClientProperties, Intent, WidgetSettings,
-        settings::element_call::{HeaderStyle, VirtualElementCallWidgetConfig},
+        settings::element_call::{CameraBackground, HeaderStyle, VirtualElementCallWidgetConfig},
     };
 
     const WIDGET_ID: &str = "1/@#w23";
@@ -823,5 +884,43 @@ mod tests {
             serde_json::to_string(&Intent::JoinExistingDmVoice).unwrap(),
             r#""join_existing_dm_voice""#
         );
+    }
+
+    fn camera_background_query(background: Option<CameraBackground>) -> QuerySet {
+        let props = VirtualElementCallWidgetProperties {
+            element_call_url: "https://call.element.io".to_owned(),
+            widget_id: WIDGET_ID.to_owned(),
+            ..VirtualElementCallWidgetProperties::default()
+        };
+        let config = VirtualElementCallWidgetConfig {
+            camera_background: background,
+            ..VirtualElementCallWidgetConfig::default()
+        };
+        let settings = WidgetSettings::new_virtual_element_call_widget(props, config).unwrap();
+        get_query_sets(settings.raw_url()).unwrap().1
+    }
+
+    fn param(set: &QuerySet, key: &str) -> Option<String> {
+        set.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn test_camera_background_url_params() {
+        let q = camera_background_query(None);
+        assert_eq!(param(&q, "backgroundEffect"), None);
+        assert_eq!(param(&q, "backgroundImageUrl"), None);
+
+        let q = camera_background_query(Some(CameraBackground::None));
+        assert_eq!(param(&q, "backgroundEffect").as_deref(), Some("none"));
+        assert_eq!(param(&q, "backgroundImageUrl"), None);
+
+        let q = camera_background_query(Some(CameraBackground::Blur));
+        assert_eq!(param(&q, "backgroundEffect").as_deref(), Some("blur"));
+        assert_eq!(param(&q, "backgroundImageUrl"), None);
+
+        let url = "https://example.org/beach.jpg?size=large&x=1";
+        let q = camera_background_query(Some(CameraBackground::Image { url: url.to_owned() }));
+        assert_eq!(param(&q, "backgroundEffect").as_deref(), Some("image"));
+        assert_eq!(param(&q, "backgroundImageUrl").as_deref(), Some(url));
     }
 }
