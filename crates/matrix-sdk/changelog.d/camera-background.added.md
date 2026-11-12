@@ -1,0 +1,1 @@
+Add `VirtualElementCallWidgetConfig::camera_background` to set a background effect for the local camera feed of a call: a background picture (virtual green screen) via `CameraBackground::Image`, or `CameraBackground::Blur`. It is passed to Element Call as the `backgroundEffect` and `backgroundImageUrl` url parameters.
